@@ -11,6 +11,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 
 // ════════ theme ════════
+enum TeteTheme { midnight, light, ocean, forest }
+
 /// ألوان TETE — فضاء غامق هادي. ممنوع: بينك / موف فاتح / ألوان صارخة.
 class C {
   static const bg = Color(0xFF0A0E1A);
@@ -29,17 +31,28 @@ class C {
 TextStyle mono({double size = 14, Color color = C.text, FontWeight w = FontWeight.w500}) =>
     GoogleFonts.jetBrainsMono(fontSize: size, color: color, fontWeight: w);
 
-ThemeData buildTheme() {
-  final base = ThemeData.dark(useMaterial3: true);
+ThemeData buildTheme(TeteTheme mode) {
+  final base = mode == TeteTheme.light
+      ? ThemeData.light(useMaterial3: true)
+      : ThemeData.dark(useMaterial3: true);
+  final primary = mode == TeteTheme.forest
+      ? const Color(0xFF62C48A)
+      : mode == TeteTheme.ocean
+          ? const Color(0xFF38BDF8)
+          : C.accent;
+  final surface = mode == TeteTheme.light ? const Color(0xFFF4F6FA) : C.card;
+  final background = mode == TeteTheme.light ? const Color(0xFFF8F9FC) : C.bg;
+  final textColor = mode == TeteTheme.light ? const Color(0xFF182033) : C.text;
+  final mutedColor = mode == TeteTheme.light ? const Color(0xFF647087) : C.sub;
   final tt = GoogleFonts.ibmPlexSansArabicTextTheme(base.textTheme)
-      .apply(bodyColor: C.text, displayColor: C.text);
+      .apply(bodyColor: textColor, displayColor: textColor);
   return base.copyWith(
-    scaffoldBackgroundColor: C.bg,
-    colorScheme: const ColorScheme.dark(
-      primary: C.accent,
-      secondary: C.accent2,
-      surface: C.card,
-      onSurface: C.text,
+    scaffoldBackgroundColor: background,
+    colorScheme: base.colorScheme.copyWith(
+      primary: primary,
+      secondary: mode == TeteTheme.forest ? const Color(0xFFB7E4C7) : C.accent2,
+      surface: surface,
+      onSurface: mode == TeteTheme.light ? const Color(0xFF182033) : C.text,
     ),
     textTheme: tt,
     dividerColor: C.border,
@@ -49,8 +62,8 @@ ThemeData buildTheme() {
       backgroundColor: C.bg,
       indicatorColor: C.raised,
       height: 66,
-      labelTextStyle: WidgetStatePropertyAll(
-        GoogleFonts.ibmPlexSansArabic(fontSize: 11, color: C.sub),
+      labelTextStyle: MaterialStatePropertyAll(
+        GoogleFonts.ibmPlexSansArabic(fontSize: 11, color: mutedColor),
       ),
     ),
     inputDecorationTheme: InputDecorationTheme(
@@ -82,10 +95,10 @@ ThemeData buildTheme() {
       style: TextButton.styleFrom(foregroundColor: C.accent),
     ),
     switchTheme: SwitchThemeData(
-      thumbColor: WidgetStateProperty.resolveWith(
-          (s) => s.contains(WidgetState.selected) ? C.accent : C.sub),
-      trackColor: WidgetStateProperty.resolveWith(
-          (s) => s.contains(WidgetState.selected) ? C.raised : C.card),
+      thumbColor: MaterialStateProperty.resolveWith(
+          (s) => s.contains(MaterialState.selected) ? C.accent : C.sub),
+      trackColor: MaterialStateProperty.resolveWith(
+          (s) => s.contains(MaterialState.selected) ? C.raised : C.card),
     ),
   );
 }
@@ -294,6 +307,8 @@ class AppStore extends ChangeNotifier {
   int waterGoal = 8;
   bool stars = true;
   List<String> customQuotes = [];
+  TeteTheme theme = TeteTheme.midnight;
+  bool arabic = true;
 
   static String key(DateTime d) => DateFormat('yyyy-MM-dd').format(d);
   static DateTime addDays(DateTime d, int n) => DateTime(d.year, d.month, d.day + n);
@@ -336,6 +351,10 @@ class AppStore extends ChangeNotifier {
     waterGoal = m['water'] ?? 8;
     stars = m['stars'] ?? true;
     customQuotes = List<String>.from(m['quotes'] ?? []);
+    final themeIndex = (m['themeIndex'] ?? 0) as int;
+    final safeThemeIndex = themeIndex.clamp(0, TeteTheme.values.length - 1).toInt();
+    theme = TeteTheme.values[safeThemeIndex];
+    arabic = m['arabic'] ?? true;
   }
 
   Map<String, dynamic> _toMap() => {
@@ -345,12 +364,24 @@ class AppStore extends ChangeNotifier {
         'water': waterGoal,
         'stars': stars,
         'quotes': customQuotes,
+        'themeIndex': theme.index,
+        'arabic': arabic,
       };
 
   /// احفظي + حدّثي الشاشات.
   void commit() {
     _p.setString(_k, jsonEncode(_toMap()));
     notifyListeners();
+  }
+
+  void setTheme(TeteTheme value) {
+    theme = value;
+    commit();
+  }
+
+  void setArabic(bool value) {
+    arabic = value;
+    commit();
   }
 
   String exportJson() => jsonEncode(_toMap());
@@ -1958,6 +1989,43 @@ class SettingsScreen extends StatelessWidget {
           ),
         ),
 
+        // اللغة
+        Panel(
+          child: Row(
+            children: [
+              const Icon(Icons.language_rounded, color: C.accent),
+              const SizedBox(width: 12),
+              const Expanded(child: Text('لغة التطبيق')),
+              ChoiceChip(
+                label: const Text('العربية'),
+                selected: s.arabic,
+                onSelected: (_) => s.setArabic(true),
+              ),
+            ],
+          ),
+        ),
+
+        // الثيمات
+        Panel(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text('المظهر والثيم', style: TextStyle(fontWeight: FontWeight.w600)),
+              const SizedBox(height: 12),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  _themeChip(context, s, TeteTheme.midnight, 'الفضائي'),
+                  _themeChip(context, s, TeteTheme.light, 'لايت'),
+                  _themeChip(context, s, TeteTheme.ocean, 'المحيط'),
+                  _themeChip(context, s, TeteTheme.forest, 'الغابة'),
+                ],
+              ),
+            ],
+          ),
+        ),
+
         // المظهر
         Panel(
           child: Row(
@@ -2022,6 +2090,16 @@ class SettingsScreen extends StatelessWidget {
           child: Text('TETE 1.0 🌌', style: TextStyle(color: C.dim, fontSize: 12)),
         ),
       ],
+    );
+  }
+
+  Widget _themeChip(BuildContext context, AppStore s, TeteTheme value, String label) {
+    return ChoiceChip(
+      label: Text(label),
+      selected: s.theme == value,
+      onSelected: (_) => s.setTheme(value),
+      selectedColor: C.accent.withOpacity(0.24),
+      labelStyle: TextStyle(color: s.theme == value ? C.accent : C.sub),
     );
   }
 
@@ -2147,6 +2225,14 @@ class SettingsScreen extends StatelessWidget {
 // ════════ main ════════
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  await SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp, DeviceOrientation.portraitDown]);
+  await SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
+  SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
+    statusBarColor: Colors.transparent,
+    systemNavigationBarColor: Colors.transparent,
+    statusBarIconBrightness: Brightness.light,
+    systemNavigationBarIconBrightness: Brightness.light,
+  ));
   await initializeDateFormatting('ar');
   final store = AppStore();
   await store.load();
@@ -2160,7 +2246,7 @@ class TeteApp extends StatelessWidget {
   Widget build(BuildContext context) => MaterialApp(
         debugShowCheckedModeBanner: false,
         title: 'TETE',
-        theme: buildTheme(),
+        theme: buildTheme(context.watch<AppStore>().theme),
         builder: (context, child) =>
             Directionality(textDirection: TextDirection.rtl, child: child!),
         home: const Shell(),
@@ -2180,6 +2266,7 @@ class _ShellState extends State<Shell> {
   Widget build(BuildContext context) {
     final stars = context.select<AppStore, bool>((s) => s.stars);
     return Scaffold(
+      extendBody: true,
       body: Stack(
         children: [
           if (stars) const Positioned.fill(child: Starfield()),
