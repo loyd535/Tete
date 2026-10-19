@@ -23,7 +23,7 @@ if (flutterVersionName == null) {
 }
 
 android {
-    namespace = "Tete.exmple.com"
+    namespace = "Tate.example.com"
     compileSdk = 36
     ndkVersion = flutter.ndkVersion
 
@@ -37,9 +37,9 @@ android {
     }
 
     defaultConfig {
-        applicationId = "Tete.exmple.com"
+        applicationId = "Tate.example.com"
         minSdk = 24
-        targetSdk = 35
+        targetSdk = 33
         versionCode = flutterVersionCode.toInteger()
         versionName = flutterVersionName
     }
