@@ -59,8 +59,8 @@ ThemeData buildTheme(TeteTheme mode) {
     splashFactory: NoSplash.splashFactory,
     highlightColor: Colors.transparent,
     navigationBarTheme: NavigationBarThemeData(
-      backgroundColor: C.bg,
-      indicatorColor: C.raised,
+      backgroundColor: background,
+      indicatorColor: surface,
       height: 66,
       labelTextStyle: MaterialStatePropertyAll(
         GoogleFonts.ibmPlexSansArabic(fontSize: 11, color: mutedColor),
@@ -68,7 +68,7 @@ ThemeData buildTheme(TeteTheme mode) {
     ),
     inputDecorationTheme: InputDecorationTheme(
       filled: true,
-      fillColor: C.raised,
+      fillColor: surface,
       hintStyle: const TextStyle(color: C.dim),
       contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
       border: OutlineInputBorder(
@@ -223,17 +223,34 @@ class DayData {
 class Note {
   String id, date, content;
   bool pinned;
+  bool archived;
+  bool trashed;
 
-  Note({required this.id, required this.date, required this.content, this.pinned = false});
+  Note({
+    required this.id,
+    required this.date,
+    required this.content,
+    this.pinned = false,
+    this.archived = false,
+    this.trashed = false,
+  });
 
-  Map<String, dynamic> toJson() =>
-      {'id': id, 'date': date, 'content': content, 'pinned': pinned};
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'date': date,
+        'content': content,
+        'pinned': pinned,
+        'archived': archived,
+        'trashed': trashed,
+      };
 
   factory Note.fromJson(Map<String, dynamic> j) => Note(
-        id: j['id'],
-        date: j['date'],
-        content: j['content'] ?? '',
-        pinned: j['pinned'] ?? false,
+        id: j['id']?.toString() ?? uid(),
+        date: j['date']?.toString() ?? AppStore.key(DateTime.now()),
+        content: j['content']?.toString() ?? '',
+        pinned: j['pinned'] == true,
+        archived: j['archived'] == true,
+        trashed: j['trashed'] == true,
       );
 }
 
@@ -307,6 +324,8 @@ class AppStore extends ChangeNotifier {
   int waterGoal = 8;
   bool stars = true;
   List<String> customQuotes = [];
+  TeteTheme theme = TeteTheme.midnight;
+  bool arabic = true;
   TeteTheme theme = TeteTheme.midnight;
   bool arabic = true;
 
@@ -537,6 +556,34 @@ class AppStore extends ChangeNotifier {
   }
 
   void deleteNote(String id) {
+    notes.removeWhere((e) => e.id == id);
+    commit();
+  }
+
+  void archiveNote(String id) {
+    final n = notes.firstWhere((e) => e.id == id);
+    n.archived = true;
+    n.trashed = false;
+    n.pinned = false;
+    commit();
+  }
+
+  void restoreNote(String id) {
+    final n = notes.firstWhere((e) => e.id == id);
+    n.archived = false;
+    n.trashed = false;
+    commit();
+  }
+
+  void trashNote(String id) {
+    final n = notes.firstWhere((e) => e.id == id);
+    n.trashed = true;
+    n.archived = false;
+    n.pinned = false;
+    commit();
+  }
+
+  void permanentlyDeleteNote(String id) {
     notes.removeWhere((e) => e.id == id);
     commit();
   }
@@ -772,7 +819,7 @@ class StickerWrap extends StatelessWidget {
                     Text(st.$1, style: const TextStyle(fontSize: 26)),
                     const SizedBox(height: 4),
                     Text(st.$2,
-                        style: const TextStyle(fontSize: 11, color: C.sub)),
+                        style: const TextStyle(fontSize: 11, color: muted)),
                   ],
                 ),
               ),
@@ -1571,98 +1618,197 @@ class NotesScreen extends StatefulWidget {
 
 class _NotesScreenState extends State<NotesScreen> {
   String _q = '';
+  int _view = 0; // 0 active, 1 archived, 2 trash
+
+  String _title(L l) => _view == 1 ? l.archive : _view == 2 ? l.trash : l.notes;
 
   @override
   Widget build(BuildContext context) {
     final s = context.watch<AppStore>();
-    final list = s.notes
-        .where((n) => _q.isEmpty || n.content.contains(_q))
-        .toList()
+    final l = L(s.arabic);
+    final list = s.notes.where((n) {
+      final inView = _view == 0
+          ? !n.archived && !n.trashed
+          : _view == 1
+              ? n.archived && !n.trashed
+              : n.trashed;
+      return inView && (_q.isEmpty || n.content.toLowerCase().contains(_q.toLowerCase()));
+    }).toList()
       ..sort((a, b) {
-        if (a.pinned != b.pinned) return a.pinned ? -1 : 1;
+        if (_view == 0 && a.pinned != b.pinned) return a.pinned ? -1 : 1;
         return b.date.compareTo(a.date);
       });
 
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
-      child: Column(
-        children: [
-          Row(
+    return Stack(
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 16, 16, 82),
+          child: Column(
             children: [
-              const Expanded(
-                child: Text('نوتات', style: TextStyle(fontSize: 24, fontWeight: FontWeight.w700)),
+              Row(
+                children: [
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(_title(l), style: const TextStyle(fontSize: 26, fontWeight: FontWeight.w800)),
+                        const SizedBox(height: 3),
+                        Text(
+                          _view == 0 ? 'أفكارك في مكان واحد' : _view == 1 ? 'نوتات محفوظة بعيدًا عن الرئيسية' : 'يمكنك استعادتها أو حذفها نهائيًا',
+                          style: const TextStyle(color: C.sub, fontSize: 12),
+                        ),
+                      ],
+                    ),
+                  ),
+                  PopupMenuButton<int>(
+                    icon: const Icon(Icons.menu_rounded),
+                    tooltip: 'قائمة النوتات',
+                    onSelected: (value) => setState(() => _view = value),
+                    itemBuilder: (_) => const [
+                      PopupMenuItem(value: 0, child: ListTile(leading: Icon(Icons.notes_rounded), title: Text('النوتات'), contentPadding: EdgeInsets.zero)),
+                      PopupMenuItem(value: 1, child: ListTile(leading: Icon(Icons.archive_outlined), title: Text('الأرشيف'), contentPadding: EdgeInsets.zero)),
+                      PopupMenuItem(value: 2, child: ListTile(leading: Icon(Icons.delete_outline_rounded), title: Text('المهملات'), contentPadding: EdgeInsets.zero)),
+                    ],
+                  ),
+                ],
               ),
-              IconButton.filled(
-                onPressed: () => _edit(context, null),
-                style: IconButton.styleFrom(backgroundColor: C.accent, foregroundColor: C.bg),
-                icon: const Icon(Icons.add_rounded),
+              const SizedBox(height: 14),
+              TextField(
+                onChanged: (v) => setState(() => _q = v.trim()),
+                decoration: InputDecoration(
+                  hintText: l.search,
+                  prefixIcon: const Icon(Icons.search_rounded, color: C.dim),
+                  suffixIcon: _q.isEmpty ? null : IconButton(icon: const Icon(Icons.close_rounded), onPressed: () => setState(() => _q = '')),
+                ),
+              ),
+              const SizedBox(height: 14),
+              Expanded(
+                child: list.isEmpty
+                    ? _emptyState()
+                    : ListView.separated(
+                        padding: const EdgeInsets.only(bottom: 24),
+                        itemCount: list.length,
+                        separatorBuilder: (_, __) => const SizedBox(height: 10),
+                        itemBuilder: (_, i) => _noteCard(context, list[i]),
+                      ),
               ),
             ],
           ),
-          const SizedBox(height: 12),
-          TextField(
-            onChanged: (v) => setState(() => _q = v.trim()),
-            decoration: const InputDecoration(
-              hintText: 'بحث…',
-              prefixIcon: Icon(Icons.search_rounded, color: C.dim),
+        ),
+        if (_view == 0)
+          Positioned(
+            bottom: 10,
+            left: 0,
+            right: 0,
+            child: Center(
+              child: FloatingActionButton.extended(
+                onPressed: () => _edit(context, null),
+                backgroundColor: C.accent,
+                foregroundColor: C.bg,
+                icon: const Icon(Icons.add_rounded),
+                label: Text(l.newNote),
+              ),
             ),
           ),
+      ],
+    );
+  }
+
+  Widget _emptyState() {
+    final icon = _view == 1 ? Icons.archive_outlined : _view == 2 ? Icons.delete_outline_rounded : Icons.auto_awesome_outlined;
+    final s = context.read<AppStore>();
+    final l = L(s.arabic);
+    final text = _view == 1 ? l.archivedEmpty : _view == 2 ? l.trashEmpty : l.empty;
+    return Center(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 48, color: C.dim),
           const SizedBox(height: 12),
-          Expanded(
-            child: list.isEmpty
-                ? const Center(
-                    child: Text('مفيش نوتات لسه ✨', style: TextStyle(color: C.dim)),
-                  )
-                : ListView.builder(
-                    padding: const EdgeInsets.only(bottom: 24),
-                    itemCount: list.length,
-                    itemBuilder: (_, i) {
-                      final n = list[i];
-                      return Dismissible(
-                        key: ValueKey(n.id),
-                        onDismissed: (_) => s.deleteNote(n.id),
-                        background: Container(color: C.raised),
-                        child: Panel(
-                          onTap: () => _edit(context, n),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Row(
-                                children: [
-                                  if (n.pinned)
-                                    const Padding(
-                                      padding: EdgeInsetsDirectional.only(end: 6),
-                                      child: Icon(Icons.push_pin_rounded, size: 14, color: C.accent2),
-                                    ),
-                                  Text(
-                                    DateFormat('d MMMM', 'ar').format(DateTime.parse(n.date)),
-                                    style: const TextStyle(color: C.sub, fontSize: 12),
-                                  ),
-                                ],
-                              ),
-                              const SizedBox(height: 6),
-                              Text(n.content,
-                                  maxLines: 4,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: const TextStyle(height: 1.6)),
-                            ],
-                          ),
-                        ),
-                      );
-                    },
-                  ),
-          ),
+          Text(text, style: const TextStyle(color: C.sub, fontSize: 15, fontWeight: FontWeight.w600)),
+          const SizedBox(height: 5),
+          Text(_view == 0 ? 'اكتبي أول فكرة تيجي في بالك' : 'كل شيء مرتب هنا.', style: const TextStyle(color: C.dim, fontSize: 12)),
         ],
       ),
     );
   }
 
-  void _edit(BuildContext context, Note? n) {
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      builder: (_) => _NoteEditor(note: n),
+  Widget _noteCard(BuildContext context, Note n) {
+    final s = context.read<AppStore>();
+    return Dismissible(
+      key: ValueKey('${n.id}-$_view'),
+      direction: DismissDirection.endToStart,
+      confirmDismiss: (_) async {
+        if (_view == 2) {
+          final ok = await _confirmDelete(context, n.id);
+          return ok;
+        }
+        s.trashNote(n.id);
+        return true;
+      },
+      background: Container(
+        alignment: AlignmentDirectional.centerEnd,
+        padding: const EdgeInsets.symmetric(horizontal: 20),
+        decoration: BoxDecoration(color: C.warn, borderRadius: BorderRadius.circular(18)),
+        child: Icon(_view == 2 ? Icons.delete_forever_rounded : Icons.delete_outline_rounded, color: C.bg),
+      ),
+      child: Panel(
+        onTap: _view == 2 ? null : () => _edit(context, n),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                if (n.pinned && _view == 0) const Padding(padding: EdgeInsetsDirectional.only(end: 6), child: Icon(Icons.push_pin_rounded, size: 14, color: C.accent2)),
+                Expanded(child: Text(DateFormat('d MMMM', 'ar').format(DateTime.parse(n.date)), style: const TextStyle(color: C.sub, fontSize: 12))),
+                PopupMenuButton<String>(
+                  padding: EdgeInsets.zero,
+                  onSelected: (action) {
+                    if (action == 'archive') { s.archiveNote(n.id); ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(L(s.arabic).archivedDone))); }
+                    if (action == 'restore') { s.restoreNote(n.id); ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(L(s.arabic).restored))); }
+                    if (action == 'trash') s.trashNote(n.id);
+                    if (action == 'delete') s.permanentlyDeleteNote(n.id);
+                  },
+                  itemBuilder: (_) => [
+                    if (_view == 0) const PopupMenuItem(value: 'archive', child: Text('أرشفة')),
+                    if (_view == 1) const PopupMenuItem(value: 'restore', child: Text('استعادة')),
+                    if (_view != 2) const PopupMenuItem(value: 'trash', child: Text('نقل للمهملات')),
+                    if (_view == 2) const PopupMenuItem(value: 'restore', child: Text('استعادة')),
+                    if (_view == 2) const PopupMenuItem(value: 'delete', child: Text('حذف نهائي')),
+                  ],
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Text(n.content, maxLines: 4, overflow: TextOverflow.ellipsis, style: const TextStyle(height: 1.6)),
+          ],
+        ),
+      ),
     );
+  }
+
+  Future<bool> _confirmDelete(BuildContext context, String id) async {
+    final l = L(context.read<AppStore>().arabic);
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(l.deleteForever),
+        content: Text(l.arabic ? 'لا يمكن التراجع عن الحذف النهائي.' : 'This cannot be undone.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text(l.arabic ? 'إلغاء' : 'Cancel')),
+          FilledButton(onPressed: () => Navigator.pop(ctx, true), child: Text(l.deleteForever)),
+        ],
+      ),
+    ) ?? false;
+    if (ok) {
+      context.read<AppStore>().permanentlyDeleteNote(id);
+      if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(l.deleted)));
+    }
+    return ok;
+  }
+
+  void _edit(BuildContext context, Note? n) {
+    showModalBottomSheet(context: context, isScrollControlled: true, builder: (_) => _NoteEditor(note: n));
   }
 }
 
@@ -1989,39 +2135,30 @@ class SettingsScreen extends StatelessWidget {
           ),
         ),
 
-        // اللغة
         Panel(
           child: Row(
             children: [
               const Icon(Icons.language_rounded, color: C.accent),
               const SizedBox(width: 12),
-              const Expanded(child: Text('لغة التطبيق')),
-              ChoiceChip(
-                label: const Text('العربية'),
-                selected: s.arabic,
-                onSelected: (_) => s.setArabic(true),
-              ),
+              Expanded(child: Text(L(s.arabic).language)),
+              ChoiceChip(label: Text(L(true).arabic), selected: s.arabic, onSelected: (_) => s.setArabic(true)),
+              const SizedBox(width: 6),
+              ChoiceChip(label: Text(L(false).english), selected: !s.arabic, onSelected: (_) => s.setArabic(false)),
             ],
           ),
         ),
-
-        // الثيمات
         Panel(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Text('المظهر والثيم', style: TextStyle(fontWeight: FontWeight.w600)),
+              Text(L(s.arabic).themes, style: const TextStyle(fontWeight: FontWeight.w700)),
               const SizedBox(height: 12),
-              Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: [
-                  _themeChip(context, s, TeteTheme.midnight, 'الفضائي'),
-                  _themeChip(context, s, TeteTheme.light, 'لايت'),
-                  _themeChip(context, s, TeteTheme.ocean, 'المحيط'),
-                  _themeChip(context, s, TeteTheme.forest, 'الغابة'),
-                ],
-              ),
+              Wrap(spacing: 8, runSpacing: 8, children: [
+                _themeChip(s, TeteTheme.midnight, L(s.arabic).midnight),
+                _themeChip(s, TeteTheme.light, L(s.arabic).light),
+                _themeChip(s, TeteTheme.ocean, L(s.arabic).ocean),
+                _themeChip(s, TeteTheme.forest, L(s.arabic).forest),
+              ]),
             ],
           ),
         ),
@@ -2068,23 +2205,6 @@ class SettingsScreen extends StatelessWidget {
           ),
         ),
 
-        // البيانات
-        Panel(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const SectionTitle('بياناتي (محلية 100%)'),
-              _row(Icons.copy_rounded, 'نسخ نسخة احتياطية (JSON)', () async {
-                await Clipboard.setData(ClipboardData(text: s.exportJson()));
-                if (context.mounted) _toast(context, 'اتنسخت. الصقيها في ملاحظات أو رسالة لنفسك.');
-              }),
-              _row(Icons.paste_rounded, 'استيراد نسخة احتياطية', () => _import(context)),
-              _row(Icons.delete_outline_rounded, 'حذف كل حاجة', () => _wipe(context),
-                  color: C.warn),
-            ],
-          ),
-        ),
-
         const SizedBox(height: 8),
         const Center(
           child: Text('TETE 1.0 🌌', style: TextStyle(color: C.dim, fontSize: 12)),
@@ -2093,15 +2213,12 @@ class SettingsScreen extends StatelessWidget {
     );
   }
 
-  Widget _themeChip(BuildContext context, AppStore s, TeteTheme value, String label) {
-    return ChoiceChip(
-      label: Text(label),
-      selected: s.theme == value,
-      onSelected: (_) => s.setTheme(value),
-      selectedColor: C.accent.withOpacity(0.24),
-      labelStyle: TextStyle(color: s.theme == value ? C.accent : C.sub),
-    );
-  }
+  Widget _themeChip(AppStore s, TeteTheme value, String label) => ChoiceChip(
+        label: Text(label),
+        selected: s.theme == value,
+        onSelected: (_) => s.setTheme(value),
+        selectedColor: C.accent.withOpacity(.25),
+      );
 
   Widget _row(IconData i, String t, VoidCallback f, {Color color = C.text}) => InkWell(
         onTap: f,
@@ -2247,8 +2364,13 @@ class TeteApp extends StatelessWidget {
         debugShowCheckedModeBanner: false,
         title: 'TETE',
         theme: buildTheme(context.watch<AppStore>().theme),
-        builder: (context, child) =>
-            Directionality(textDirection: TextDirection.rtl, child: child!),
+        builder: (context, child) {
+          final ar = context.watch<AppStore>().arabic;
+          return Directionality(
+            textDirection: ar ? TextDirection.rtl : TextDirection.ltr,
+            child: child!,
+          );
+        },
         home: const Shell(),
       );
 }
@@ -2264,7 +2386,9 @@ class _ShellState extends State<Shell> {
 
   @override
   Widget build(BuildContext context) {
-    final stars = context.select<AppStore, bool>((s) => s.stars);
+    final app = context.watch<AppStore>();
+    final stars = app.stars;
+    final ar = app.arabic;
     return Scaffold(
       extendBody: true,
       body: Stack(
@@ -2292,12 +2416,12 @@ class _ShellState extends State<Shell> {
           selectedIndex: _i,
           onDestinationSelected: (i) => setState(() => _i = i),
           labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
-          destinations: const [
-            NavigationDestination(icon: Text('🌑', style: TextStyle(fontSize: 20)), label: 'النهاردة'),
-            NavigationDestination(icon: Text('🪐', style: TextStyle(fontSize: 20)), label: 'الشهر'),
-            NavigationDestination(icon: Text('✨', style: TextStyle(fontSize: 20)), label: 'نوتات'),
-            NavigationDestination(icon: Text('⭐', style: TextStyle(fontSize: 20)), label: 'إحصائيات'),
-            NavigationDestination(icon: Text('☄️', style: TextStyle(fontSize: 20)), label: 'إعدادات'),
+          destinations: [
+            NavigationDestination(icon: Text('🌑', style: TextStyle(fontSize: 20)), label: ar ? 'النهاردة' : 'Today'),
+            NavigationDestination(icon: Text('🪐', style: TextStyle(fontSize: 20)), label: ar ? 'الشهر' : 'Month'),
+            NavigationDestination(icon: Text('✨', style: TextStyle(fontSize: 20)), label: ar ? 'نوتات' : 'Notes'),
+            NavigationDestination(icon: Text('⭐', style: TextStyle(fontSize: 20)), label: ar ? 'إحصائيات' : 'Insights'),
+            NavigationDestination(icon: Text('☄️', style: TextStyle(fontSize: 20)), label: ar ? 'إعدادات' : 'Settings'),
           ],
         ),
       ),
